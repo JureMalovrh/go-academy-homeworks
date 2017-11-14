@@ -16,10 +16,12 @@ import (
 
 var dbReadWriter bucket.MockReadWriter
 var currentId int = 1
+var previousData []string
 
-func addToDB(result string) {
+func addToDB(result string, calculation string) {
 	resultInt, _ := strconv.ParseInt(result, 0, 0)
 	dbReadWriter.Insert(currentId, int(resultInt))
+	previousData = append(previousData, fmt.Sprintf("$%d = %s", currentId, calculation))
 	currentId++
 }
 
@@ -40,7 +42,14 @@ func calculateHandler(w http.ResponseWriter, r *http.Request) {
 	tmpl := `<form method="post">
 		<input name="calculation" required> <input type="submit" value="Calculate expression">
 		</form>
-		{{ if .Calculator }}<h1>{{ .Calculator }}</h1>{{ end }}`
+		{{ if .Calculator }}<h1>{{ .Calculator }}</h1>{{ end }}
+		<p> Previous calculations: </p>
+		<ul>
+		{{ range $value := .PreviousData }}
+			<li>{{ $value }}</li>
+		{{ end }}
+		</ul>
+		`
 
 	// set the encoding
 	w.Header().Add("Content-type", "text/html")
@@ -53,9 +62,10 @@ func calculateHandler(w http.ResponseWriter, r *http.Request) {
 
 	calculation := ""
 	if r.FormValue("calculation") != "" {
-		calculatedVal, idsFromDB, operator := calculator.Parse(r.FormValue("calculation"))
+		inputValue := r.FormValue("calculation")
+		calculatedVal, idsFromDB, operator := calculator.Parse(inputValue)
 		if idsFromDB == nil || len(idsFromDB) == 0 {
-			addToDB(calculatedVal)
+			addToDB(calculatedVal, inputValue)
 			calculation += calculatedVal
 		} else {
 			valuesFromDB, err := getValuesFromDb(idsFromDB)
@@ -64,16 +74,18 @@ func calculateHandler(w http.ResponseWriter, r *http.Request) {
 			} else {
 				finalValue := calculator.CalculateArrays(calculatedVal, valuesFromDB, operator)
 				calculation += finalValue
-				addToDB(finalValue)
+				addToDB(finalValue, inputValue)
 			}
 		}
 	}
 
 	// prepare the data
 	data := struct {
-		Calculator string
+		Calculator   string
+		PreviousData []string
 	}{
-		Calculator: calculation,
+		Calculator:   calculation,
+		PreviousData: previousData,
 	}
 
 	// parse the template
